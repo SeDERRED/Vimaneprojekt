@@ -4,10 +4,10 @@ import javafx.application.Application;
 
 public class Main {
     public static void main(String[] args) {
-        // 1. Запуск HUD оверлея
-        new Thread(() -> Application.launch(HudApplication.class)).start();
 
-        // 2. Запуск сетевого слушателя UDP
+        new Thread(() -> Application.launch(HudApplication.class, args)).start();
+
+
         UdpListener listener = new UdpListener(telemetryPoint -> {
             if (HudApplication.getInstance() != null) {
                 HudApplication.getInstance().updateTelemetry(telemetryPoint);
