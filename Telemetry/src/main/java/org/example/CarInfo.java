@@ -17,8 +17,6 @@ public class CarInfo {
 
     private final Stage stage;
     private final Label fuelLabel;
-    private final Label fuelPerLapLabel;
-    private final Label damageLabel;
 
     private final Label[] wearLabels = new Label[4];
     private final Label[] tempLabels = new Label[4];
@@ -34,8 +32,6 @@ public class CarInfo {
         title.setTextFill(Color.GOLD);
 
         fuelLabel = createLabel("FUEL: 0.0 L", 12, Color.WHITE);
-        fuelPerLapLabel = createLabel("LAST LAP: -- L", 12, Color.LIGHTGRAY);
-        damageLabel = createLabel("DAMAGE: 0%", 12, Color.LIME);
 
         GridPane grid = new GridPane();
         grid.setHgap(10);
@@ -57,11 +53,11 @@ public class CarInfo {
             grid.add(box, i % 2, i / 2);
         }
 
-        VBox root = new VBox(8, title, fuelLabel, fuelPerLapLabel, grid, damageLabel);
+        // Убрали строки с расходом, оставили топливо, сетку колес и повреждения
+        VBox root = new VBox(6, title, fuelLabel, grid);
         root.setPadding(new Insets(12));
         root.setStyle("-fx-background-color: rgba(15, 15, 15, 0.85); -fx-background-radius: 12; -fx-border-color: rgba(255,255,255,0.1); -fx-border-radius: 12;");
 
-        // Логика перемещения окна мышкой
         root.setOnMousePressed(e -> {
             offset[0] = e.getSceneX();
             offset[1] = e.getSceneY();
@@ -71,7 +67,7 @@ public class CarInfo {
             stage.setY(e.getScreenY() - offset[1]);
         });
 
-        Scene scene = new Scene(root, 220, 270);
+        Scene scene = new Scene(root, 220, 240); // Уменьшили высоту окна, так как строк стало меньше
         scene.setFill(Color.TRANSPARENT);
 
         stage.initStyle(StageStyle.TRANSPARENT);
@@ -87,12 +83,6 @@ public class CarInfo {
         Platform.runLater(() -> {
             fuelLabel.setText(String.format("FUEL: %.1f L", fuel));
 
-            if (fuelLastLap > 0) {
-                fuelPerLapLabel.setText(String.format("LAST LAP: %.2f L", fuelLastLap));
-            } else {
-                fuelPerLapLabel.setText("LAST LAP: -- L");
-            }
-
             if (wear != null && wear.length == 4) {
                 for (int i = 0; i < 4; i++) {
                     wearLabels[i].setText(String.format("%.0f%%", wear[i]));
@@ -105,19 +95,19 @@ public class CarInfo {
             if (temp != null && temp.length == 4) {
                 for (int i = 0; i < 4; i++) {
                     tempLabels[i].setText(String.format("%.0f°C", temp[i]));
+                    if (temp[i] < 70) tempLabels[i].setTextFill(Color.CYAN);
+                    else if (temp[i] > 115) tempLabels[i].setTextFill(Color.RED);
+                    else if (temp[i] > 100) tempLabels[i].setTextFill(Color.YELLOW);
+                    else tempLabels[i].setTextFill(Color.LIME);
                 }
             }
 
             if (press != null && press.length == 4) {
                 for (int i = 0; i < 4; i++) {
-                    pressLabels[i].setText(String.format("%.1f PSI", press[i]));
+                    float psi = press[i];
+                    pressLabels[i].setText(String.format("%.1f PSI", psi));
                 }
             }
-
-            damageLabel.setText("DAMAGE: " + damage + "%");
-            if (damage > 50) damageLabel.setTextFill(Color.RED);
-            else if (damage > 0) damageLabel.setTextFill(Color.YELLOW);
-            else damageLabel.setTextFill(Color.LIME);
         });
     }
 

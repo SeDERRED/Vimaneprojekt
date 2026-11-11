@@ -13,13 +13,18 @@ import javafx.scene.text.FontWeight;
 import javafx.stage.Stage;
 import javafx.stage.StageStyle;
 
+import java.util.List;
 
 public class HudApplication extends Application {
     private Label speedLabel;
     private Label gearLabel;
     private Label rpmLabel;
-    private DriverStatsWindow driverStatsWindow;
+
+    private DriverStatsWindow statsWindow;
     private CarInfo carInfo;
+
+    // Окно инспектора пакета
+
 
     private static HudApplication instance;
 
@@ -27,43 +32,49 @@ public class HudApplication extends Application {
         return instance;
     }
 
+    public DriverStatsWindow getDriverStatsWindow() {
+        return statsWindow;
+    }
+
+    public CarInfo getCarInfo() {
+        return carInfo;
+    }
+
+
+
     @Override
     public void start(Stage primaryStage) {
         instance = this;
 
-
+        // Основные элементы телеметрии (Главное окно)
         gearLabel = createLabel("N", 48, Color.GOLD);
         speedLabel = createLabel("0 KM/H", 24, Color.WHITE);
         rpmLabel = createLabel("0 RPM", 16, Color.LIGHTGRAY);
 
-
         VBox root = new VBox(4, gearLabel, speedLabel, rpmLabel);
         root.setAlignment(Pos.CENTER);
-        root.setPadding(new Insets(15));
+        root.setPadding(new Insets(12, 15, 12, 15));
+        root.setStyle("-fx-background-color: rgba(15, 15, 15, 0.85); -fx-background-radius: 12; -fx-border-color: rgba(255,255,255,0.1); -fx-border-radius: 12;");
 
-
-        root.setStyle("-fx-background-color: rgba(15, 15, 15, 0.8); -fx-background-radius: 12; -fx-border-color: rgba(255,255,255,0.1); -fx-border-radius: 12;");
-
-
-        Scene scene = new Scene(root, 180, 140);
+        Scene scene = new Scene(root, 200, 140);
         scene.setFill(Color.TRANSPARENT);
 
         primaryStage.initStyle(StageStyle.TRANSPARENT);
         primaryStage.setAlwaysOnTop(true);
         primaryStage.setScene(scene);
 
-
         primaryStage.setX(50);
         primaryStage.setY(600);
-
 
         makeDraggable(root, primaryStage);
         primaryStage.show();
 
-        driverStatsWindow = new DriverStatsWindow();
+        statsWindow = new DriverStatsWindow();
         carInfo = new CarInfo();
-    }
 
+        // Запуск окна инспектора пакета
+
+    }
 
     public void updateTelemetry(Telemetry point) {
         Platform.runLater(() -> {
@@ -84,15 +95,19 @@ public class HudApplication extends Application {
         });
     }
 
+    public void updateDriverStats(List<DriverStats> participants) {
+        if (statsWindow != null) {
+            statsWindow.updateStats(participants);
+        }
+    }
+
     public void updateCarStatus(float fuel, float fuelLastLap, float[] wear, float[] temp, float[] press, int damage) {
         if (carInfo != null) {
             carInfo.updateInfo(fuel, fuelLastLap, wear, temp, press, damage);
         }
     }
 
-    public DriverStatsWindow getDriverStatsWindow() {
-        return driverStatsWindow;
-    }
+
 
     private Label createLabel(String text, int fontSize, Color color) {
         Label label = new Label(text);
@@ -100,7 +115,6 @@ public class HudApplication extends Application {
         label.setTextFill(color);
         return label;
     }
-
 
     private void makeDraggable(VBox node, Stage stage) {
         final double[] offset = new double[2];

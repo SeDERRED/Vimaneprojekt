@@ -7,68 +7,62 @@ import java.util.List;
 
 public class TelemetryParser {
 
-    private static final int PACKET_TYPE_TELEMETRY = 0;
-    private static final int PACKET_TYPE_PARTICIPANTS = 3;
-    private static final int PACKET_TYPE_TIMINGS = 7;
+    public static final int PACKET_TYPE_TELEMETRY = 0;
+    public static final int PACKET_TYPE_PARTICIPANTS = 1;
+    public static final int PACKET_TYPE_TIMINGS_3 = 3;
+    public static final int PACKET_TYPE_TIMINGS_7 = 7;
 
-    private static float fuelAtLapStart =-1.0f;
+    private static float currentFuel = -1.0f;
+    private static float fuelAtLapStart = -1.0f;
     private static float lastCalculatedFuelPerLap = 0.0f;
     private static float lastDistance = 0.0f;
+    private static int lastRecordedLap = -1;
+
+    // Времена и позиция игрока
+    private static float playerCurrentTime = 0.0f;
+    private static float playerLastLapTime = 0.0f;
+    private static int playerPosition = 0;
+
+    private static int candidatePosition = 0;
+    private static int candidateConfirmCount = 0;
 
     public static Telemetry parseTelemetryPacket(byte[] buffer) {
 
-        if (buffer == null || buffer.length < 500) {
+        if (buffer == null || buffer.length < 50) {
             return null;
         }
 
         ByteBuffer bb = ByteBuffer.wrap(buffer).order(ByteOrder.LITTLE_ENDIAN);
 
         try {
-
-            int packetNumber = bb.getInt();
-            int categoryPacketNumber = bb.getInt();
-            byte partialPacketIndex = bb.get();
-            byte partialPacketNumber = bb.get();
+            bb.position(10);
             byte packetType = bb.get();
-            byte packetVersion = bb.get();
-
 
             if (packetType != PACKET_TYPE_TELEMETRY) {
                 return null;
             }
 
-
-
             bb.position(36);
             float speedMps = bb.getFloat();
-
 
             if (Float.isNaN(speedMps) || Float.isInfinite(speedMps) || speedMps < 0 || speedMps > 200) {
                 speedMps = 0.0f;
             }
             float speedKmh = speedMps * 3.6f;
 
+            int rpm = bb.getShort(40) & 0xFFFF;
+            if (rpm > 25000) rpm = 0;
 
-            int rpm = bb.getShort() & 0xFFFF;
-            if (rpm > 20000) rpm = 0; // Защита от мусорных данных
+            int gear = buffer[45] & 0x0F;
 
-
-            bb.position(45);
-            byte gearByte = bb.get();
-            int gear = gearByte & 0x0F;
-
-
-            bb.position(29);
-            float brake = (bb.get() & 0xFF) / 255.0f;
-            float throttle = (bb.get() & 0xFF) / 255.0f;
+            float brake = (buffer[29] & 0xFF) / 255.0f;
+            float throttle = (buffer[30] & 0xFF) / 255.0f;
 
             bb.position(88);
             float distanceMeters = bb.getFloat();
             if (Float.isNaN(distanceMeters) || distanceMeters < 0) {
                 distanceMeters = 0.0f;
             }
-            bb.position(60);
-            int racePosition = bb.get() & 0xFF;
 
             return new Telemetry(
                     distanceMeters,
@@ -79,75 +73,109 @@ public class TelemetryParser {
                     rpm
             );
 
-
         } catch (Exception e) {
             return null;
         }
     }
-    public static List<Participant> parseParticipantsPacket(byte[] buffer) {
-        if (buffer == null || buffer.length < 15) {
+
+    public static List<DriverStats> parseDriverStatsPacket(byte[] buffer) {
+        if (buffer == null || buffer.length < 34) {
             return null;
         }
 
         ByteBuffer bb = ByteBuffer.wrap(buffer).order(ByteOrder.LITTLE_ENDIAN);
 
         try {
-            // Байт типа пакета со смещения 10
             bb.position(10);
             byte packetType = bb.get();
 
-            if (packetType != PACKET_TYPE_TIMINGS) {
+            if (packetType != PACKET_TYPE_TIMINGS_3 && packetType != PACKET_TYPE_TIMINGS_7) {
                 return null;
             }
 
-            List<Participant> participants = new ArrayList<>();
+            List<DriverStats> driverStatsList = new ArrayList<>();
 
-            // Смещение 12 — количество участников в сессии
-            bb.position(12);
-            byte numParticipants = bb.get();
+            final int PARTICIPANT_START = 13;
+            final int PARTICIPANT_SIZE  = 21;
 
-            // Смещение 15 — начало массива структур участников sParticipants (до 32 участников)
-            bb.position(15);
+            int numParticipants = buffer[12] & 0xFF;
+            if (numParticipants <= 0 || numParticipants > 64) numParticipants = 50;
 
-            for (int i = 0; i < Math.min(numParticipants, 32); i++) {
+            for (int i = 0; i < Math.min(numParticipants, 50); i++) {
+                int base = PARTICIPANT_START + i * PARTICIPANT_SIZE;
+                if (base + PARTICIPANT_SIZE > buffer.length) break;
 
-                byte racePosAndFlags = bb.get();
-                int position = racePosAndFlags & 0x7F;
+                bb.position(base);
+                short lapDistance = bb.getShort();
+                int rawPos = bb.get() & 0x3F;
+                int currentLap = bb.get() & 0xFF;
 
-                byte currentLap = bb.get();
-                float currentTime = bb.getFloat();
-                float currentSectorTime = bb.getFloat();
-                float lastLapTime = bb.getFloat();
+                // [4..7] Сколько кругов осталось (float)
+                float lapsRemainingFloat = bb.getFloat(base + 4);
+                int toGo = 0;
+                if (!Float.isNaN(lapsRemainingFloat) && lapsRemainingFloat >= 0.0f && lapsRemainingFloat <= 500.0f) {
+                    toGo = Math.round(lapsRemainingFloat);
+                }
 
-                byte pitModeAndSchedule = bb.get();
-                int pitMode = pitModeAndSchedule & 0x0F;
-                boolean inPits = pitMode > 0;
+                float currentTime = 0.0f;
+                // [8..11] Рабочий GAP разрыв
+                float gapAhead = bb.getFloat(base + 8);
 
-                bb.position(bb.position() + 8);
+                if (Float.isNaN(gapAhead) || gapAhead < 0.0f || gapAhead > 3600.0f) {
+                    gapAhead = 0.0f;
+                }
 
-                if (position > 0) {
-                    String driverName = "Driver " + (i + 1);
-                    float gapToAhead = 0.0f;
+                if (i == 0) {
+                    if (rawPos > 0 && rawPos <= 64) {
+                        if (playerPosition > 3 && rawPos == 1) {
+                            if (candidatePosition == 1) {
+                                candidateConfirmCount++;
+                                if (candidateConfirmCount >= 3) {
+                                    playerPosition = 1;
+                                }
+                            } else {
+                                candidatePosition = 1;
+                                candidateConfirmCount = 1;
+                            }
+                        } else {
+                            playerPosition = rawPos;
+                            candidatePosition = rawPos;
+                            candidateConfirmCount = 0;
+                        }
+                    }
 
-                    participants.add(new Participant(
-                            position,
+                    if (currentLap > 0 && currentLap < 200) {
+                        if (lastRecordedLap != -1 && currentLap > lastRecordedLap) {
+                            if (playerCurrentTime > 5.0f) {
+                                playerLastLapTime = playerCurrentTime;
+                            }
+                        }
+                        lastRecordedLap = currentLap;
+                    }
+
+                    driverStatsList.add(new DriverStats(
+                            playerPosition,
+                            currentLap,
+                            toGo,
                             currentTime,
-                            lastLapTime
+                            gapAhead,
+                            playerLastLapTime
                     ));
+                    break;
                 }
             }
 
-
-            participants.sort((p1, p2) -> Integer.compare(p1.getPosition(), p2.getPosition()));
-
-            return participants;
+            return driverStatsList;
 
         } catch (Exception e) {
             return null;
         }
     }
+
     public static void parseCarInfoPacket(byte[] buffer) {
-        if (buffer == null || buffer.length < 500) return;
+        // Уменьшаем минимальную длину, если пакет короче 500 байт,
+        // но содержит данные телеметрии машины
+        if (buffer == null || buffer.length < 300) return;
 
         ByteBuffer bb = ByteBuffer.wrap(buffer).order(ByteOrder.LITTLE_ENDIAN);
 
@@ -155,66 +183,74 @@ public class TelemetryParser {
             bb.position(10);
             byte packetType = bb.get();
 
+            // Если игра шлет данные CarInfo в пакетах типа 0 или других — разрешаем обработку
+            // (Убираем строгий возврат, если packetType != 0, либо проверяем диапазон)
 
-            if (packetType != PACKET_TYPE_TELEMETRY) return;
-
-
-            bb.position(116);
+            bb.position(132);
             float fuel = bb.getFloat();
-            if (Float.isNaN(fuel) || fuel < 0) fuel = 0.0f;
-
+            if (!Float.isNaN(fuel) && fuel >= 0 && fuel < 500f) {
+                currentFuel = fuel;
+                if (fuelAtLapStart < 0) {
+                    fuelAtLapStart = fuel;
+                }
+                if (fuel > fuelAtLapStart + 1.0f) {
+                    fuelAtLapStart = fuel;
+                }
+            } else {
+                fuel = 0.0f;
+            }
 
             bb.position(88);
             float distanceMeters = bb.getFloat();
-
-            if (distanceMeters < 50 && lastDistance > 1000) {
-                if (fuelAtLapStart > 0) {
-                    lastCalculatedFuelPerLap = fuelAtLapStart - fuel;
+            if (!Float.isNaN(distanceMeters) && distanceMeters >= 0) {
+                if (distanceMeters < 100 && lastDistance > 800) {
+                    if (playerCurrentTime > 5.0f) {
+                        playerLastLapTime = playerCurrentTime;
+                    }
                 }
-                fuelAtLapStart = fuel;
+                lastDistance = distanceMeters;
             }
-            if (fuelAtLapStart < 0) fuelAtLapStart = fuel;
-            lastDistance = distanceMeters;
-
 
             float[] wear = new float[4];
             bb.position(124);
             for (int i = 0; i < 4; i++) {
+                if (bb.position() + 4 > buffer.length) break;
                 float rawWear = bb.getFloat();
                 wear[i] = Math.max(0.0f, (1.0f - rawWear) * 100.0f);
             }
 
-
             float[] temp = new float[4];
             bb.position(188);
             for (int i = 0; i < 4; i++) {
+                if (bb.position() + 4 > buffer.length) break;
                 float tyreTemp = bb.getFloat();
                 temp[i] = (Float.isNaN(tyreTemp) || tyreTemp < 0) ? 0.0f : tyreTemp;
             }
 
-
             float[] pressure = new float[4];
             bb.position(220);
             for (int i = 0; i < 4; i++) {
-                float pressBar = bb.getFloat() / 100.0f;
+                if (bb.position() + 4 > buffer.length) break;
+                float pressBar = bb.getFloat();
                 pressure[i] = Math.max(0.0f, pressBar);
             }
 
-
-            bb.position(496);
-            int crashState = bb.get() & 0xFF;
-            int aeroDamage = Math.min(crashState * 20, 100);
-
+            int aeroDamage = 0;
+            if (buffer.length > 496) {
+                int crashState = buffer[496] & 0xFF;
+                aeroDamage = Math.min(crashState * 20, 100);
+            }
 
             HudApplication app = HudApplication.getInstance();
-            if (app != null) {
-                app.updateCarStatus(fuel, lastCalculatedFuelPerLap, wear, temp, pressure, aeroDamage);
+            if (app != null && app.getCarInfo() != null) {
+                app.getCarInfo().updateInfo(fuel, lastCalculatedFuelPerLap, wear, temp, pressure, aeroDamage);
             }
 
         } catch (Exception e) {
             System.err.println("[CarInfo Error] " + e.getMessage());
         }
     }
+
 
     public static void parseParticipantsNamesPacket(byte[] buffer) {
         if (buffer == null || buffer.length < 20) return;

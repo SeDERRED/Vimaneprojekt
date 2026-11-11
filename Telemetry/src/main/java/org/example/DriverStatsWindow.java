@@ -2,6 +2,7 @@ package org.example;
 
 import javafx.application.Platform;
 import javafx.geometry.Insets;
+import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.Label;
 import javafx.scene.layout.VBox;
@@ -15,76 +16,103 @@ import java.util.List;
 
 public class DriverStatsWindow {
     private final Stage stage;
-    private final VBox root;
     private final Label posLabel;
-    private final Label currentLapLabel;
+    private final Label lapLabel;
+    private final Label lapsToGoLabel;
+    private final Label curTimeLabel;
+    private final Label gapLabel;
     private final Label lastLapLabel;
-    private final double[] offset = new double[2];
 
     public DriverStatsWindow() {
         stage = new Stage();
 
-        root = new VBox(6);
-        root.setPadding(new Insets(12, 15, 12, 15));
-        root.setStyle("-fx-background-color: rgba(15, 15, 15, 0.85); -fx-background-radius: 12; -fx-border-color: rgba(255,255,255,0.1); -fx-border-radius: 12;");
+        Label statsTitle = createLabel("DRIVER STATS", 12, Color.GOLD);
+        posLabel = createLabel("POS: P--", 16, Color.WHITE);
+        lapLabel = createLabel("LAP: --", 13, Color.CYAN);
+        lapsToGoLabel = createLabel("LAPS LEFT: --", 12, Color.YELLOW);
+        curTimeLabel = createLabel("CUR: --:--.---", 11, Color.LIGHTBLUE);
+        gapLabel = createLabel("GAP: --:--.---", 11, Color.LIGHTGREEN);
+        lastLapLabel = createLabel("LAST: --:--.---", 11, Color.LIGHTGRAY);
 
-        Label title = new Label("DRIVER STATS");
-        title.setFont(Font.font("Consolas", FontWeight.BOLD, 14));
-        title.setTextFill(Color.GOLD);
+        VBox root = new VBox(4, statsTitle, posLabel, lapLabel, lapsToGoLabel, curTimeLabel, gapLabel, lastLapLabel);
+        root.setAlignment(Pos.CENTER);
+        root.setPadding(new Insets(10, 15, 10, 15));
+        root.setStyle("-fx-background-color: rgba(15, 15, 15, 0.85); -fx-background-radius: 10; -fx-border-color: rgba(255,255,255,0.1); -fx-border-radius: 10;");
 
-        posLabel = createStatLabel("POS: --", 20, Color.WHITE);
-        currentLapLabel = createStatLabel("CURRENT: --:--.---", 12, Color.CYAN);
-        lastLapLabel = createStatLabel("LAST: --:--.---", 12, Color.LIGHTGREEN);
-
-        root.getChildren().addAll(title, posLabel, currentLapLabel, lastLapLabel);
-
-        root.setOnMousePressed(event -> {
-            offset[0] = event.getSceneX();
-            offset[1] = event.getSceneY();
-        });
-
-        root.setOnMouseDragged(event -> {
-            stage.setX(event.getScreenX() - offset[0]);
-            stage.setY(event.getScreenY() - offset[1]);
-        });
-
-        Scene scene = new Scene(root, 220, 140);
+        Scene scene = new Scene(root, 180, 165);
         scene.setFill(Color.TRANSPARENT);
 
         stage.initStyle(StageStyle.TRANSPARENT);
         stage.setAlwaysOnTop(true);
         stage.setScene(scene);
-        stage.setX(250);
+
+        stage.setX(260);
         stage.setY(600);
-        stage.setTitle("Driver Stats HUD");
+
+        makeDraggable(root, stage);
         stage.show();
     }
 
-    public void updateStats(List<Participant> participants) {
+    public void updateStats(List<DriverStats> participants) {
         if (participants == null || participants.isEmpty()) return;
 
-        Participant p = participants.get(0);
+        DriverStats p = participants.get(0);
 
         Platform.runLater(() -> {
-            posLabel.setText("POS: P" + p.getPosition());
-            currentLapLabel.setText("CURRENT: " + formatTime(p.getCurrentTime()));
-            lastLapLabel.setText("LAST: " + formatTime(p.getLastLapTime()));
+            int pos = p.getPosition();
+            posLabel.setText(pos > 0 ? "POS: P" + pos : "POS: P--");
+
+            int lap = p.getCurrentLap();
+            lapLabel.setText(lap > 0 ? "LAP: " + lap : "LAP: --");
+
+            int toGo = p.getLapsRemaining();
+            if (toGo > 0) {
+                lapsToGoLabel.setText(String.format("LAPS LEFT: %d", toGo));
+            } else {
+                lapsToGoLabel.setText("LAPS LEFT: --");
+            }
+
+            float cur = p.getCurrentTime();
+            if (cur > 0.0f) {
+                curTimeLabel.setText("CUR: " + DriverStats.formatTime(cur));
+            } else {
+                curTimeLabel.setText("CUR: --:--.---");
+            }
+
+            float gap = p.getGapAhead();
+            if (gap > 0.0f) {
+                gapLabel.setText("GAP: " + DriverStats.formatTime(gap));
+                gapLabel.setTextFill(Color.LIGHTGREEN);
+            } else {
+                gapLabel.setText("GAP: ---");
+                gapLabel.setTextFill(Color.GRAY);
+            }
+
+            float last = p.getLastLapTime();
+            if (last > 0.0f) {
+                lastLapLabel.setText("LAST: " + DriverStats.formatTime(last));
+            } else {
+                lastLapLabel.setText("LAST: --:--.---");
+            }
         });
     }
 
-    private String formatTime(float timeInSeconds) {
-        if (timeInSeconds <= 0 || Float.isNaN(timeInSeconds)) {
-            return "--:--.---";
-        }
-        int minutes = (int) (timeInSeconds / 60);
-        float seconds = timeInSeconds % 60;
-        return String.format("%d:%06.3f", minutes, seconds);
-    }
-
-    private Label createStatLabel(String text, int fontSize, Color color) {
+    private Label createLabel(String text, int fontSize, Color color) {
         Label label = new Label(text);
         label.setFont(Font.font("Consolas", FontWeight.BOLD, fontSize));
         label.setTextFill(color);
         return label;
+    }
+
+    private void makeDraggable(VBox node, Stage stage) {
+        final double[] offset = new double[2];
+        node.setOnMousePressed(event -> {
+            offset[0] = event.getSceneX();
+            offset[1] = event.getSceneY();
+        });
+        node.setOnMouseDragged(event -> {
+            stage.setX(event.getScreenX() - offset[0]);
+            stage.setY(event.getScreenY() - offset[1]);
+        });
     }
 }
